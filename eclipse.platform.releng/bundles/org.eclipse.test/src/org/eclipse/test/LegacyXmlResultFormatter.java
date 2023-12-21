@@ -247,9 +247,19 @@ public class LegacyXmlResultFormatter extends AbstractJUnitResultFormatter {
 		void writeTestCase(final XMLStreamWriter writer) throws XMLStreamException {
 			for (final Map.Entry<TestIdentifier, Stats> entry : testIds.entrySet()) {
 				final TestIdentifier testId = entry.getKey();
-				if (!testId.isTest()) {
-					// only interested in test methods
+				if (!testId.isTest() && !testPlan.getChildren(testId).isEmpty()) {
+					// only interested in test methods and empty test containers (if a container is
+					// empty, it means that if failed during initialization)
+					boolean found = false;
+					for (TestIdentifier child : testPlan.getChildren(testId)) {
+						if (testIds.containsKey(child)) {
+							found = true;
+						}
+					}
+
+					if (found) {
 					continue;
+					}
 				}
 				// find the parent class of this test method
 				final Optional<TestIdentifier> parent = testPlan.getParent(testId);
@@ -322,6 +332,9 @@ public class LegacyXmlResultFormatter extends AbstractJUnitResultFormatter {
 				}
 				writer.writeAttribute(ATTR_TYPE, t.getClass().getName());
 				writer.writeCharacters(ExceptionUtils.readStackTrace(t));
+			} else {
+				System.out.println(
+						"Skipping: '" + testIdentifier.getDisplayName() + "' because it doesn't have any cause");
 			}
 			writer.writeEndElement();
 		}

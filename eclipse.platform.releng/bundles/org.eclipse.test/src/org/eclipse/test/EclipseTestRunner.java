@@ -17,10 +17,14 @@ package org.eclipse.test;
 
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -28,7 +32,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.tools.ant.Project;
 import org.apache.tools.ant.taskdefs.optional.junitlauncher.TestExecutionContext;
@@ -43,6 +52,8 @@ import org.junit.platform.launcher.core.LauncherFactory;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
 
 /**
  * A TestRunner for JUnit that supports Ant JUnitResultFormatters and running
@@ -52,6 +63,86 @@ import org.osgi.framework.FrameworkUtil;
  * .XMLJUnitResultFormatter
  */
 public class EclipseTestRunner {
+
+	private static class RunArguments {
+		String className = null;
+		String classesNames = null;
+		String testPluginName = null;
+		String testPluginsNames = null;
+		String resultCheckerName = null;
+		String resultCheckersNames = "";
+		String resultPathString = null;
+		String timeoutString = null;
+		String junitReportOutput = null;
+		Properties props = new Properties();
+
+		RunArguments(String[] args) throws IOException {
+
+			int startArgs = 0;
+			if (args.length > 0) {
+				// support the JUnit task commandline syntax where
+				// the first argument is the name of the test class
+				if (!args[0].startsWith("-")) {
+					className = args[0];
+					startArgs++;
+				}
+			}
+			for (int i = startArgs; i < args.length; i++) {
+				if (args[i].toLowerCase().equals("-classname")) {
+					if (i < args.length - 1) {
+						className = args[i + 1];
+					}
+					i++;
+				} else if (args[i].toLowerCase().equals("-classesnames")) {
+					if (i < args.length - 1) {
+						classesNames = args[i + 1];
+					}
+					i++;
+				} else if (args[i].toLowerCase().equals("-testpluginname")) {
+					if (i < args.length - 1) {
+						testPluginName = args[i + 1];
+					}
+					i++;
+				} else if (args[i].toLowerCase().equals("-testpluginsnames")) {
+					if (i < args.length - 1) {
+						testPluginsNames = args[i + 1];
+					}
+					i++;
+				} else if (args[i].toLowerCase().equals("-resultcheckername")) {
+					if (i < args.length - 1) {
+						resultCheckerName = args[i + 1];
+					}
+					i++;
+				} else if (args[i].toLowerCase().equals("-resultcheckersnames")) {
+					if (i < args.length - 1) {
+						resultCheckersNames = args[i + 1];
+					}
+					i++;
+				} else if (args[i].equals("-junitReportOutput")) {
+					if (i < args.length - 1) {
+						junitReportOutput = args[i + 1];
+					}
+					i++;
+				} else if (args[i].startsWith("formatter=")) {
+					String formatterString = args[i].substring(10);
+					int seperatorIndex = formatterString.indexOf(',');
+					resultPathString = seperatorIndex == -1 ? null : formatterString.substring(seperatorIndex + 1);
+				} else if (args[i].startsWith("propsfile=")) {
+					try (FileInputStream in = new FileInputStream(args[i].substring(10))) {
+						props.load(in);
+					}
+				} else if (args[i].equals("-timeout")) {
+					if (i < args.length - 1) {
+						timeoutString = args[i + 1];
+					}
+					i++;
+				}
+			}
+			// Add/overlay system properties on the properties from the Ant project
+			props.putAll(System.getProperties());
+
+		}
+	}
 
 	/**
 	 * No problems with this test.
@@ -82,98 +173,44 @@ public class EclipseTestRunner {
 	 * run or should be the path to the result directory where result files should
 	 * be created if multiple tests are being run. If no path is given, the standard
 	 * output is used.
+	 * 
+	 * @throws SAXException
+	 * @throws ParserConfigurationException
 	 */
-	public static void main(String[] args) throws IOException {
+	public static void main(String[] args) throws IOException, ParserConfigurationException, SAXException {
 		System.exit(run(args));
 	}
 
 	public static int run(String[] args) throws IOException {
-		String className = null;
-		String classesNames = null;
-		String testPluginName = null;
-		String testPluginsNames = null;
-		String resultPathString = null;
-		String timeoutString = null;
-		String junitReportOutput = null;
+		RunArguments runArgs = new RunArguments(args);
 
-		Properties props = new Properties();
-
-		int startArgs = 0;
-		if (args.length > 0) {
-			// support the JUnit task commandline syntax where
-			// the first argument is the name of the test class
-			if (!args[0].startsWith("-")) {
-				className = args[0];
-				startArgs++;
-			}
-		}
-		for (int i = startArgs; i < args.length; i++) {
-			if (args[i].toLowerCase().equals("-classname")) {
-				if (i < args.length - 1) {
-					className = args[i + 1];
-				}
-				i++;
-			} else if (args[i].toLowerCase().equals("-classesnames")) {
-				if (i < args.length - 1) {
-					classesNames = args[i + 1];
-				}
-				i++;
-			} else if (args[i].toLowerCase().equals("-testpluginname")) {
-				if (i < args.length - 1) {
-					testPluginName = args[i + 1];
-				}
-				i++;
-			} else if (args[i].toLowerCase().equals("-testpluginsnames")) {
-				if (i < args.length - 1) {
-					testPluginsNames = args[i + 1];
-				}
-				i++;
-			} else if (args[i].equals("-junitReportOutput")) {
-				if (i < args.length - 1) {
-					junitReportOutput = args[i + 1];
-				}
-				i++;
-			} else if (args[i].startsWith("formatter=")) {
-				String formatterString = args[i].substring(10);
-				int seperatorIndex = formatterString.indexOf(',');
-				resultPathString = seperatorIndex == -1 ? null : formatterString.substring(seperatorIndex + 1);
-			} else if (args[i].startsWith("propsfile=")) {
-				try (FileInputStream in = new FileInputStream(args[i].substring(10))) {
-					props.load(in);
-				}
-			} else if (args[i].equals("-timeout")) {
-				if (i < args.length - 1) {
-					timeoutString = args[i + 1];
-				}
-				i++;
-			}
-		}
-		// Add/overlay system properties on the properties from the Ant project
-		props.putAll(System.getProperties());
-
-		if (timeoutString == null || timeoutString.isEmpty()) {
+		if (runArgs.timeoutString == null || runArgs.timeoutString.isEmpty()) {
 			System.err.println("INFO: optional timeout was not specified.");
 		} else {
 			String timeoutScreenOutputDir = null;
-			if (junitReportOutput == null || junitReportOutput.isEmpty()) {
+			if (runArgs.junitReportOutput == null || runArgs.junitReportOutput.isEmpty()) {
 				timeoutScreenOutputDir = "timeoutScreens";
 			} else {
-				timeoutScreenOutputDir = junitReportOutput + "/timeoutScreens";
+				timeoutScreenOutputDir = runArgs.junitReportOutput + "/timeoutScreens";
 			}
 			System.err.println("INFO: timeoutScreenOutputDir: " + timeoutScreenOutputDir);
-			System.err.println("INFO: timeout: " + timeoutString);
-			TimeoutDumpTimer.startTimeoutDumpTimer(timeoutString, new File(timeoutScreenOutputDir));
+			System.err.println("INFO: timeout: " + runArgs.timeoutString);
+			TimeoutDumpTimer.startTimeoutDumpTimer(runArgs.timeoutString, new File(timeoutScreenOutputDir));
 		}
 
-		if (testPluginsNames != null && classesNames != null) {
+		if (runArgs.testPluginsNames != null && runArgs.classesNames != null) {
 			// we have several plugins to look tests for, let's parse their
 			// names
-			String[] testPlugins = testPluginsNames.split(",");
-			String[] suiteClasses = classesNames.split(",");
+			String[] testPlugins = runArgs.testPluginsNames.split(",");
+			String[] suiteClasses = runArgs.classesNames.split(",");
+			String[] checkerClasses = runArgs.resultCheckersNames.split(",");
 			int returnCode = 0;
 			int j = 0;
 			for (String oneClassName : suiteClasses) {
-				int result = runTests(props, testPlugins[j], oneClassName, resultPathString, true);
+				String checkerClassName = (checkerClasses.length > j) ? checkerClasses[j] : null;
+
+				int result = runTests(runArgs.props, testPlugins[j], oneClassName, checkerClassName,
+						runArgs.resultPathString, true);
 				j++;
 				if (result != 0) {
 					returnCode = result;
@@ -181,13 +218,20 @@ public class EclipseTestRunner {
 			}
 			return returnCode;
 		}
-		if (className == null) {
+		// className = "org.eclipse.jdt.junit.tests.MyJUnit4ParameterizedTest";
+		// testPluginName = "org.eclipse.jdt.ui.tests";
+		// resultPathString = "C:\\Users\\visjee\\Desktop\\results.xml";
+		if (runArgs.className == null) {
 			throw new IllegalArgumentException("Test class name not specified");
 		}
-		return runTests(props, testPluginName, className, resultPathString, false);
+		return runTests(runArgs.props, runArgs.testPluginName, runArgs.className, runArgs.resultCheckerName,
+				runArgs.resultPathString, false);
 	}
 
-	private static int runTests(Properties props, String testPluginName, String testClassName, String resultPath,
+
+
+	private static int runTests(Properties props, String testPluginName, String testClassName, String checkerClassName,
+			String resultPath,
 			boolean multiTest) {
 		Thread thisThread = Thread.currentThread();
 		ClassLoader currentTCCL = thisThread.getContextClassLoader();
@@ -198,6 +242,7 @@ public class EclipseTestRunner {
 
 		AtomicBoolean executionFailed = new AtomicBoolean(false);
 		try (LegacyXmlResultFormatter formatter = new LegacyXmlResultFormatter();
+				ByteArrayOutputStream baos = new ByteArrayOutputStream();
 				OutputStream out = getResultOutputStream(resultPath, testClassName, multiTest)) {
 
 			ClassLoader jUnit5Classloader = ClassLoaderTools.getJUnit5Classloader(getPlatformEngines());
@@ -206,10 +251,16 @@ public class EclipseTestRunner {
 
 			thisThread.setContextClassLoader(ClassLoaderTools.getPluginClassLoader(testPlugin, jUnit5Classloader));
 
-			formatter.setDestination(out);
+			formatter.setDestination(baos);
 			formatter.setContext(createExecutionContext(props));
 
 			launcher.execute(request, formatter, createExecutionListener(executionFailed));
+
+			// write to System.out or to file
+			out.write(baos.toByteArray());
+
+			checkResult(baos.toByteArray(), checkerClassName, thisThread.getContextClassLoader());
+
 		} catch (IOException e) {
 			e.printStackTrace();
 			return ERRORS;
@@ -217,6 +268,45 @@ public class EclipseTestRunner {
 			thisThread.setContextClassLoader(currentTCCL);
 		}
 		return executionFailed.get() ? FAILURES : SUCCESS;
+	}
+
+	private static void checkResult(byte[] byteArray, String checkerClassName, ClassLoader classLoader) {
+		if (checkerClassName == null || checkerClassName.isBlank()) {
+			return;
+		}
+
+		try {
+			@SuppressWarnings("unchecked") // it's covered, there's a catch (ClassCastException e) below
+			Consumer<Document> checker = (Consumer<Document>) classLoader.loadClass(checkerClassName).getConstructor()
+					.newInstance();
+
+			Document xml = buildXML(byteArray);
+			checker.accept(xml);
+		} catch (ClassNotFoundException e) {
+			System.err.println("SKIPPING CHECK - Can't load checker class: " + checkerClassName);
+			e.printStackTrace();
+		} catch (ParserConfigurationException | SAXException | IOException e) {
+			System.err.println("Couldn't parse the XML output");
+			e.printStackTrace();
+		} catch (InstantiationException | IllegalAccessException | IllegalArgumentException | InvocationTargetException
+				| NoSuchMethodException | SecurityException e) {
+			System.err.println("Couldn't instantiate the checker of type: " + checkerClassName
+					+ ". Are you sure it implements/extends the correct interface/class?");
+			e.printStackTrace();
+		} catch (ClassCastException e) {
+			System.err.println("Couldn't cast the checker of type: " + checkerClassName);
+		}
+	}
+
+	private static Document buildXML(byte[] resultFile) throws ParserConfigurationException, SAXException, IOException {
+		DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+		Document doc = null;
+		try (InputStream is = new ByteArrayInputStream(resultFile)) {
+			doc = builder.parse(is);
+			doc.getDocumentElement().normalize();
+
+		}
+		return doc;
 	}
 
 	private static OutputStream getResultOutputStream(String resultPathString, String testClassName, boolean multiTest)
