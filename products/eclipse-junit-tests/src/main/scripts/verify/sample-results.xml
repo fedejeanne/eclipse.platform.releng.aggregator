@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sample JUnit XML result file used to manually verify JUNIT.XSL rendering.
+
+  The failure message intentionally contains multiple consecutive spaces and
+  indentation so that the whitespace-preservation fix can be validated
+  visually in the generated HTML report.
+
+  Expected (correct) rendering after the fix:
+    String s    = (String)o;   <- four spaces between 's' and '='
+
+  Without the fix the browser collapses the spaces:
+    String s = (String)o;      <- only one space, indistinguishable from a
+                                  different (passing) formatting
+-->
+<testsuites>
+  <testsuite name="org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest"
+             tests="3" errors="0" failures="1" skipped="1" time="0.312"
+             timestamp="2024-11-15T10:30:00" hostname="build-agent">
+
+    <!-- Failing test: message has significant leading/internal whitespace -->
+    <testcase name="testFormatAll01"
+              classname="org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest"
+              time="0.105">
+      <failure message="contents was not formatted. Actual:&#10;package test1;&#10;public class E1 {&#10;    public void foo( Object o ) {&#10;        String s    = (String)o;&#10;    }&#10;}" type="java.lang.AssertionError">java.lang.AssertionError: contents was not formatted. Actual:
+package test1;
+public class E1 {
+    public void foo( Object o ) {
+        String s    = (String)o;
+    }
+}
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failEquals(Assert.java:187)
+	at org.junit.Assert.assertNotEquals(Assert.java:163)
+	at org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest.assertChangedFromTo(SaveParticipantTest.java:986)
+	at org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest.testFormatAll01(SaveParticipantTest.java:138)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)</failure>
+    </testcase>
+
+    <!-- Passing test: included to show mixed results in the report -->
+    <testcase name="testFormatAll02"
+              classname="org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest"
+              time="0.098"/>
+
+    <!-- Skipped test -->
+    <testcase name="testFormatAll03"
+              classname="org.eclipse.jdt.ui.tests.quickfix.SaveParticipantTest"
+              time="0.109">
+      <skipped/>
+    </testcase>
+
+  </testsuite>
+</testsuites>
